@@ -1,0 +1,15 @@
+{
+  "name": "stowhelp-scraper",
+  "version": "1.0.0",
+  "private": false,
+  "description": "StowHelp Google Maps scraper - runs on GitHub Actions cron",
+  "scripts": {
+    "scrape": "node scripts/run.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.4",
+    "cheerio": "^1.0.0",
+    "playwright-core": "^1.44.0",
+    "whois-json": "^2.0.4"
+  }
+}

@@ -1,0 +1,22 @@
+name: Keep workflow alive
+
+on:
+  schedule:
+    # GitHub disables scheduled workflows after 60 days of no repo activity.
+    # This weekly ping prevents that.
+    - cron: '0 12 * * 1'
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keepalive ping
+        run: echo "Keepalive $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> .github/keepalive.log
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive.log
+          git diff --cached --quiet || git commit -m "chore: keepalive ping"
+          git push
