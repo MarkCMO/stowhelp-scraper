@@ -524,6 +524,26 @@ async function processBusiness(sb, biz, queueItem) {
   const { error: upsertErr } = await sb.from('listings').upsert(enriched, { onConflict: 'slug' });
   if (upsertErr) throw upsertErr;
 
+  // Fire immediate cold-outreach email if this is a NEW listing with an email.
+  // The call is fire-and-forget: scraping continues even if the email API is
+  // down. The stowhelp.com email-cron will catch any misses on its next tick.
+  if (!existing && enriched.email && process.env.INTERNAL_API_KEY) {
+    try {
+      const res = await fetch('https://stowhelp.com/api/send-outreach-immediate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-Key': process.env.INTERNAL_API_KEY
+        },
+        body: JSON.stringify({ slug }),
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!res.ok) console.warn('immediate-outreach non-200 for', slug, res.status);
+    } catch (e) {
+      console.warn('immediate-outreach fetch failed for', slug, e.message);
+    }
+  }
+
   // Outreach row: one per scraped business, status='cold'. The CRM
   // dashboard reads from outreach; rep actions update it.
   try {
