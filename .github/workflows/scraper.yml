@@ -2,15 +2,26 @@ name: Scrape Storage Facilities
 
 on:
   schedule:
-    # Every 15 minutes, 24/7. GitHub may drift 15-30 min under load.
+    # Every 15 minutes. With batch=5 + 10min timeout, runs finish in
+    # 5-7 min leaving ~8 min buffer before the next scheduled tick.
+    # This spacing is critical: GitHub skips scheduled runs if the
+    # previous one is still executing when the next tick arrives.
     - cron: '*/15 * * * *'
   workflow_dispatch:
-    # Manual trigger button in GitHub Actions UI
+
+# Serialize runs so a long run can't cause the next scheduled tick to
+# overlap (and get silently dropped). cancel-in-progress:false means a
+# late tick waits for the current run instead of killing it.
+concurrency:
+  group: scraper
+  cancel-in-progress: false
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Hard cap below the 15-min cron interval so we never spill into
+    # the next window. If something hangs, the job is killed at 10 min.
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -45,6 +56,13 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
-          SCRAPER_BATCH_SIZE: '10'
-          SCRAPER_PER_QUERY_MAX: '20'
+          # Pulled back from 10 -> 5 so each run finishes well under the 15-min
+          # cron window. 5 items * 4 runs/hr = 20 listings/hr consistent
+          # (vs the old 10 items * 0.3 runs/hr actual = 3 listings/hr).
+          SCRAPER_BATCH_SIZE: '5'
+          # Pulled back from 20 -> 15: still broad coverage, less time per query.
+          SCRAPER_PER_QUERY_MAX: '15'
+          # Internal deadline 7 min - gives Chromium a chance to wrap up
+          # gracefully before the hard 10-min GitHub timeout.
+          SCRAPER_DEADLINE_MS: '420000'
         run: node scripts/run.js

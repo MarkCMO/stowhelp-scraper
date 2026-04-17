@@ -62,7 +62,11 @@ const { buildListingSlug, slugify, linkedinSearchUrl, extractDomain, isHostedBui
 
 const BATCH_SIZE = Number(process.env.SCRAPER_BATCH_SIZE || 10);
 const PER_QUERY_MAX_BUSINESSES = Number(process.env.SCRAPER_PER_QUERY_MAX || 20);
-const GLOBAL_DEADLINE_MS = 12 * 60 * 1000; // 12 min, leaves 3 min headroom in 15-min bg function
+// Default 12 min for Netlify (15-min function budget). GitHub Actions override
+// to 7 min via SCRAPER_DEADLINE_MS so the run finishes well inside the 15-min
+// cron window (avoids the "previous run overlaps next tick -> tick skipped"
+// failure mode that was zapping our throughput).
+const GLOBAL_DEADLINE_MS = Number(process.env.SCRAPER_DEADLINE_MS || 12 * 60 * 1000);
 
 // ── HTTP-only fallback Google Maps scraper ──
 // Fetches Google Maps search results via plain HTTP (no Chromium). Google
