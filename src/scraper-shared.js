@@ -108,10 +108,32 @@ const EMAIL_BLOCKLIST = [
   /webmaster@/i // usually a catch-all, not a contact
 ];
 
+// Malformed-address patterns produced by websites that inline contact info
+// without whitespace separators ("Phone 555-5555 Email info@x.com" glues
+// together after normalization). These produced a real 11% bounce rate in
+// production. Filter aggressively: a single bounce costs us deliverability
+// reputation, a missed valid email just means one lead we don't capture.
+const MALFORMED_LOCAL_PATTERNS = [
+  /^\d{5,}/,                 // leading 5+ digits (ZIP or phone fragment)
+  /^\d+[-.]\d+[-.]\d+/,      // phone fragments like "1.424.252.5075info"
+  /\d{4,}[a-z]{4,}/i,        // digit run then letter run (e.g. "60616info", "9165sunport")
+  /(^|\.)email[a-z]/i,       // "emailbrian", "anytime.emailphone..."
+  /(^|\.)phone[a-z]/i,       // "phoneinfo", "emailphone..."
+  /(^|\.)fax[a-z]/i,         // "faxinfo..."
+  /[a-z]{3,}info$/i,         // "managementinfo", "kirklandstorageinfo"
+  /(contact|call|text|anytime|weekend|weekday)[a-z]{3,}/i  // glued prefix words
+];
+
 function isUsableEmail(email) {
   if (!email || typeof email !== 'string') return false;
   const low = email.toLowerCase();
   if (low.length > 100) return false;
+  // local-part sanity - the most common corruption source
+  const at = low.indexOf('@');
+  if (at < 1 || at > 64) return false;
+  const local = low.slice(0, at);
+  if (local.length < 1 || local.length > 64) return false;
+  if (MALFORMED_LOCAL_PATTERNS.some((rx) => rx.test(local))) return false;
   return !EMAIL_BLOCKLIST.some((rx) => rx.test(low));
 }
 
