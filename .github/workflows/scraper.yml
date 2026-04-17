@@ -1,17 +1,28 @@
 name: Scrape Storage Facilities
 
+# Continuous execution: the last step in each run dispatches the next run.
+# Result: a self-sustaining loop that runs 24/7 with zero gaps between runs.
+# Throughput: ~5 items per run × 8-10 runs/hour = 40-50 listings/hour.
+#
+# The hourly schedule is a SAFETY NET - if the chain ever breaks (runner
+# failure, GH outage, misconfiguration), this restarts the loop at the top
+# of every hour. Same story for the Netlify email-cron backup trigger.
+
 on:
   schedule:
-    # Every 15 minutes. With batch=5 + 10min timeout, runs finish in
-    # 5-7 min leaving ~8 min buffer before the next scheduled tick.
-    # This spacing is critical: GitHub skips scheduled runs if the
-    # previous one is still executing when the next tick arrives.
-    - cron: '*/15 * * * *'
+    # Fallback only - restart the chain if it ever breaks.
+    - cron: '0 * * * *'
   workflow_dispatch:
 
-# Serialize runs so a long run can't cause the next scheduled tick to
-# overlap (and get silently dropped). cancel-in-progress:false means a
-# late tick waits for the current run instead of killing it.
+# Required so the built-in GITHUB_TOKEN can re-dispatch this workflow.
+# No PAT needed for the self-trigger path.
+permissions:
+  actions: write
+  contents: read
+
+# Serialize runs so the safety-net cron never starts a duplicate scraper
+# while the continuous chain is already executing. cancel-in-progress:false
+# means a conflicting trigger waits instead of killing the running scrape.
 concurrency:
   group: scraper
   cancel-in-progress: false
@@ -19,8 +30,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    # Hard cap below the 15-min cron interval so we never spill into
-    # the next window. If something hangs, the job is killed at 10 min.
+    # Hard cap per run - the scraper finishes in ~6-7 min, this is headroom.
     timeout-minutes: 10
 
     steps:
@@ -56,13 +66,24 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
-          # Pulled back from 10 -> 5 so each run finishes well under the 15-min
-          # cron window. 5 items * 4 runs/hr = 20 listings/hr consistent
-          # (vs the old 10 items * 0.3 runs/hr actual = 3 listings/hr).
           SCRAPER_BATCH_SIZE: '5'
-          # Pulled back from 20 -> 15: still broad coverage, less time per query.
           SCRAPER_PER_QUERY_MAX: '15'
-          # Internal deadline 7 min - gives Chromium a chance to wrap up
-          # gracefully before the hard 10-min GitHub timeout.
           SCRAPER_DEADLINE_MS: '420000'
         run: node scripts/run.js
+
+      # The heart of the continuous loop. if:always() means we re-trigger
+      # EVEN IF the scraper step failed - we never want the chain to break
+      # just because one run hit an error. The hourly fallback schedule
+      # will catch us if somehow this step itself fails.
+      - name: Dispatch next run (continuous loop)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/scraper.yml/dispatches" \
+            -d '{"ref":"main"}'
+          echo "Next run dispatched - scraper loop continues."
