@@ -6,6 +6,9 @@ on:
     # This weekly ping prevents that.
     - cron: '0 12 * * 1'
 
+permissions:
+  contents: write
+
 jobs:
   keepalive:
     runs-on: ubuntu-latest
