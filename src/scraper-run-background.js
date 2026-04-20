@@ -595,6 +595,36 @@ async function processBusiness(sb, biz, queueItem) {
 async function autoReplenishQueue(sb) {
   const MAX_SEED = 30; // rows to insert per refill
 
+  // ── Step 0: recycle stale 'done' rows back to 'pending' ──
+  // Without this, the scrape_queue fills up with 'done' rows forever, the
+  // unique (state,city,category) constraint blocks new inserts via
+  // ignoreDuplicates, autoReplenishQueue silently drops every attempt,
+  // and the scraper runs forever doing nothing. Resetting anything older
+  // than 14 days keeps the scraper busy re-scraping (catches new Google
+  // Maps listings that appeared since last time).
+  try {
+    const cutoff = new Date(Date.now() - 14 * 86400000).toISOString();
+    const { data: recycled, error: recErr } = await sb
+      .from('scrape_queue')
+      .update({
+        status: 'pending',
+        attempts: 0,
+        last_error: null,
+        started_at: null,
+        finished_at: null
+      })
+      .eq('status', 'done')
+      .lt('finished_at', cutoff)
+      .select('id');
+    if (recErr) console.warn('autoReplenishQueue: recycle failed:', recErr.message);
+    else if (recycled && recycled.length) {
+      console.log(`autoReplenishQueue: recycled ${recycled.length} stale done rows back to pending`);
+      // If we recycled enough, skip the seeding step - the scraper now has
+      // plenty of work. Only seed if we need fresh combos.
+      if (recycled.length >= MAX_SEED) return recycled.length;
+    }
+  } catch (e) { console.warn('autoReplenishQueue: recycle exception:', e.message); }
+
   // Categories to rotate through
   const CATEGORIES = [
     'rv storage', 'boat storage', 'car storage', 'motorcycle storage',
