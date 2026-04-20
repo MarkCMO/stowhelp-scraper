@@ -705,29 +705,15 @@ async function autoReplenishQueue(sb) {
   // IMPORTANT: chain .select() so PostgREST returns the inserted rows -
   // without it, the client can't distinguish "inserted 30" from "inserted 0
   // because all 30 hit the ignoreDuplicates path".
-  const { data: inserted, error: insertErr, status, statusText } = await sb.from('scrape_queue')
+  const { data: inserted, error: insertErr } = await sb.from('scrape_queue')
     .upsert(rows, { onConflict: 'state,city,category', ignoreDuplicates: true })
     .select('id');
   if (insertErr) {
-    console.warn('autoReplenishQueue: insert error', insertErr.message, 'status=', status, 'statusText=', statusText);
-    console.warn('autoReplenishQueue: first row attempted:', JSON.stringify(rows[0]));
+    console.warn('autoReplenishQueue: insert error', insertErr.message);
     return 0;
   }
   const actualInserted = (inserted || []).length;
-
   console.log(`autoReplenishQueue: attempted ${rows.length} rows, actually inserted ${actualInserted}`);
-  if (actualInserted === 0 && rows.length > 0) {
-    console.warn('autoReplenishQueue: upsert returned zero rows despite no error - all hit ignoreDuplicates path');
-    console.warn('autoReplenishQueue: sample row:', JSON.stringify(rows[0]));
-    // Try a plain insert on the first row to surface the real error
-    const { error: probeErr, data: probeData } = await sb.from('scrape_queue')
-      .insert(rows[0]).select();
-    if (probeErr) {
-      console.warn('autoReplenishQueue: plain insert error:', probeErr.message, probeErr.details, probeErr.hint);
-    } else {
-      console.log('autoReplenishQueue: plain insert OK, got:', JSON.stringify(probeData));
-    }
-  }
   return actualInserted;
 }
 
